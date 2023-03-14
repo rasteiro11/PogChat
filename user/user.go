@@ -1,21 +1,70 @@
 package user
 
+import (
+	"pogchat/cryptography"
+)
+
 type user_message struct {
-	Sig    []byte `json:"signature"`
-	PubKey []byte `json:"public_key"`
-	Msg    []byte `json:"message"`
+	Sig     []byte `json:"signature"`
+	FromPK  []byte `json:"from_public_key"`
+	ToPK    []byte `json:"to_public_key"`
+	Msg     []byte `json:"message"`
+	cryptor cryptography.Cryptor
+	signer  cryptography.Signer
 }
 
 func (m *user_message) Signature() []byte {
 	return m.Sig
 }
 
-func (m *user_message) PublicKey() []byte {
-	return m.PubKey
+func (m *user_message) FromPublicKey() []byte {
+	return m.FromPK
+}
+
+func (m *user_message) ToPublicKey() []byte {
+	return m.ToPK
 }
 
 func (m *user_message) Message() []byte {
 	return m.Msg
+}
+
+func (m *user_message) GetEncryptedMessage(msg []byte) ([]byte, error) {
+	if m.Msg == nil {
+		encryptedMsg, err := m.cryptor.Encrypt(m.ToPK, msg)
+		if err != nil {
+			return nil, err
+		}
+
+		m.Msg = encryptedMsg
+	}
+
+	return m.Msg, nil
+}
+
+func (m *user_message) GetSignature(fromPrivateKey []byte, encryptedMsg []byte) ([]byte, error) {
+	if m.Sig == nil {
+		sig, err := m.signer.Sign(fromPrivateKey, encryptedMsg)
+		if err != nil {
+			return nil, err
+		}
+
+		m.Sig = sig
+	}
+
+	return m.Sig, nil
+}
+
+func WithSigner(signer cryptography.Signer) UserMessageOptions {
+	return func(u *user_message) {
+		u.signer = signer
+	}
+}
+
+func WithCryptor(cryptor cryptography.Cryptor) UserMessageOptions {
+	return func(u *user_message) {
+		u.cryptor = cryptor
+	}
 }
 
 func WithSignature(signature []byte) UserMessageOptions {
@@ -24,9 +73,15 @@ func WithSignature(signature []byte) UserMessageOptions {
 	}
 }
 
-func WithPublicKey(publicKey []byte) UserMessageOptions {
+func WithToPublicKey(publicKey []byte) UserMessageOptions {
 	return func(u *user_message) {
-		u.PubKey = publicKey
+		u.ToPK = publicKey
+	}
+}
+
+func WithFromPublicKey(publicKey []byte) UserMessageOptions {
+	return func(u *user_message) {
+		u.FromPK = publicKey
 	}
 }
 
