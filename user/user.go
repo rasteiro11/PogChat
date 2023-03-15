@@ -1,102 +1,98 @@
 package user
 
 import (
+	"crypto"
+	"crypto/rand"
+	"crypto/sha256"
 	"pogchat/cryptography"
+	"pogchat/key"
+	"pogchat/user_message"
 )
 
-type user_message struct {
-	Sig     []byte `json:"signature"`
-	FromPK  []byte `json:"from_public_key"`
-	ToPK    []byte `json:"to_public_key"`
-	Msg     []byte `json:"message"`
-	cryptor cryptography.Cryptor
-	signer  cryptography.Signer
+type User interface {
+	LoadKeyPair(privateFile string, publicFile string) (key.KeyPair, error)
+	BuildPeerMessage(msg string) (user_message.UserMessage, error)
 }
 
-func (m *user_message) Signature() []byte {
-	return m.Sig
+type user struct {
+	cryptor       cryptography.Cryptor
+	signer        cryptography.Signer
+	pair          key.KeyPair
+	peerPublicKey []byte
 }
 
-func (m *user_message) FromPublicKey() []byte {
-	return m.FromPK
-}
+func (u *user) BuildPeerMessage(msg string) (user_message.UserMessage, error) {
+	um := user_message.NewUserMessage(
+		user_message.WithSigner(u.signer),
+		user_message.WithCryptor(u.cryptor),
+		user_message.WithFromPublicKey(u.pair.PublicKey()),
+		user_message.WithToPublicKey(u.peerPublicKey))
 
-func (m *user_message) ToPublicKey() []byte {
-	return m.ToPK
-}
-
-func (m *user_message) Message() []byte {
-	return m.Msg
-}
-
-func (m *user_message) GetEncryptedMessage(msg []byte) ([]byte, error) {
-	if m.Msg == nil {
-		encryptedMsg, err := m.cryptor.Encrypt(m.ToPK, msg)
-		if err != nil {
-			return nil, err
-		}
-
-		m.Msg = encryptedMsg
+	enctyptedMsg, err := um.GetEncryptedMessage([]byte(msg))
+	if err != nil {
+		return nil, err
 	}
 
-	return m.Msg, nil
-}
-
-func (m *user_message) GetSignature(fromPrivateKey []byte, encryptedMsg []byte) ([]byte, error) {
-	if m.Sig == nil {
-		sig, err := m.signer.Sign(fromPrivateKey, encryptedMsg)
-		if err != nil {
-			return nil, err
-		}
-
-		m.Sig = sig
+	_, err = um.GetSignature(u.pair.PrivateKey(), enctyptedMsg)
+	if err != nil {
+		return nil, err
 	}
 
-	return m.Sig, nil
+	return um, nil
 }
 
-func WithSigner(signer cryptography.Signer) UserMessageOptions {
-	return func(u *user_message) {
+func (u *user) LoadKeyPair(privateFile string, publicFile string) (key.KeyPair, error) {
+	pair, err := key.LoadKeyPair(key.WithPublicKey(publicFile), key.WithPrivateKey(privateFile))
+	if err != nil {
+		return nil, err
+	}
+
+	u.pair = pair
+
+	return pair, nil
+}
+
+func WithSigner(signer cryptography.Signer) UserOptions {
+	return func(u *user) {
 		u.signer = signer
 	}
 }
 
-func WithCryptor(cryptor cryptography.Cryptor) UserMessageOptions {
-	return func(u *user_message) {
+func WithCryptor(cryptor cryptography.Cryptor) UserOptions {
+	return func(u *user) {
 		u.cryptor = cryptor
 	}
 }
 
-func WithSignature(signature []byte) UserMessageOptions {
-	return func(u *user_message) {
-		u.Sig = signature
+func WithUserKeyPair(pair key.KeyPair) UserOptions {
+	return func(u *user) {
+		u.pair = pair
 	}
+
 }
 
-func WithToPublicKey(publicKey []byte) UserMessageOptions {
-	return func(u *user_message) {
-		u.ToPK = publicKey
+func WithPeerPublicKey(peerPublicKey []byte) UserOptions {
+	return func(u *user) {
+		u.peerPublicKey = peerPublicKey
 	}
+
 }
 
-func WithFromPublicKey(publicKey []byte) UserMessageOptions {
-	return func(u *user_message) {
-		u.FromPK = publicKey
-	}
-}
+type UserOptions func(*user)
 
-func WithMessage(message []byte) UserMessageOptions {
-	return func(u *user_message) {
-		u.Msg = message
+func NewUser(opts ...UserOptions) User {
+	u := &user{
+		cryptor: cryptography.NewCryptor(
+			cryptography.WithHasher(sha256.New()),
+			cryptography.WithRandomizer(rand.Reader)),
+		signer: cryptography.NewSigner(
+			cryptography.WithSignerHasher(crypto.SHA256),
+			cryptography.WithSignerRandomizer(rand.Reader)),
 	}
-}
-
-func NewUserMessage(opts ...UserMessageOptions) UserMessage {
-	um := &user_message{}
 
 	for _, opt := range opts {
-		opt(um)
+		opt(u)
 	}
 
-	return um
+	return u
 }
