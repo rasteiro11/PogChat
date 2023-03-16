@@ -4,7 +4,6 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/sha256"
-	"fmt"
 	"pogchat/cryptography"
 	"pogchat/key"
 	"testing"
@@ -73,23 +72,30 @@ func TestUserMessage(t *testing.T) {
 		WithSigner(s),
 	)
 
-	encryptedMsg, _ := um.GetEncryptedMessage([]byte("GAMER VERY GAMER"))
-	fmt.Println("ENCODED MSG: ", encryptedMsg)
-
-	decodedMsg, _ := c.Decrypt(pairReceiver.PrivateKey(), encryptedMsg)
-
-	fmt.Println("DECODED MSG: ", string(decodedMsg))
-
-	sig, _ := um.GetSignature(pairReceiver.PrivateKey(), []byte("GAMER VERY GAMER"))
-
-	valid, _ := s.Verify(pairReceiver.PublicKey(), []byte("GAMER VERY GAMER"), sig)
-
-	if valid {
-		fmt.Println("THIS SHIT IS A VALID MESSAGE")
+	test := []struct {
+		name string
+		msg  string
+	}{
+		{
+			name: "with message opt",
+			msg:  "hello world",
+		},
 	}
 
-	jUm, _ := um.MarshalJSON()
-	fmt.Println("GAMER MESSAGE: ", string(jUm))
+	for _, tt := range test {
+		t.Run(tt.name, func(t *testing.T) {
+			encryptedMsg, err := um.GetEncryptedMessage([]byte(tt.msg))
+			assert.Nil(t, err, "get encrypted message should be possible")
 
-	// t.Error("END")
+			decryptedMsg, err := c.Decrypt(pairReceiver.PrivateKey(), encryptedMsg)
+			assert.Nil(t, err, "decoding must be possible")
+			assert.Equal(t, tt.msg, string(decryptedMsg), "decryption must be possible")
+
+			sig, err := um.GetSignature(pairReceiver.PrivateKey(), encryptedMsg)
+			assert.Nil(t, err, "could not sign encrypted message")
+
+			_, err = s.Verify(pairReceiver.PublicKey(), encryptedMsg, sig)
+			assert.Nil(t, err, "could not validate signature")
+		})
+	}
 }

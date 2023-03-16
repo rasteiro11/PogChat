@@ -3,11 +3,11 @@ package user
 import (
 	"crypto"
 	"crypto/rand"
-	"encoding/base64"
-	"fmt"
 	"pogchat/cryptography"
 	"pogchat/key"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestUserBuilder(t *testing.T) {
@@ -20,22 +20,30 @@ func TestUserBuilder(t *testing.T) {
 		WithUserKeyPair(pairSender),
 		WithPeerPublicKey(pairReceiver.PublicKey()))
 
-	msg := "MSG GAMER"
-
-	um, _ := user.BuildPeerMessage(msg)
-
-	toBeSent, _ := um.MarshalJSON()
-
-	fmt.Println("MESSAGE SERIALIZED: ", string(toBeSent))
-
-	fmt.Println("ENCRYPTED MSG: ", base64.RawStdEncoding.EncodeToString(um.Message()))
-	fmt.Println("SIGNATURE: ", base64.RawStdEncoding.EncodeToString(um.Signature()))
-
-	ok, _ := s.Verify(pairSender.PublicKey(), um.Message(), um.Signature())
-	if ok {
-		fmt.Println("GAMERS GAMING")
+	test := []struct {
+		name         string
+		verifyResult bool
+		msg          string
+	}{
+		{
+			name:         "with message opt",
+			verifyResult: true,
+			msg:          "hello world",
+		},
 	}
 
-	t.Fatalf("WE ARE GETTING TO THE END")
+	for _, tt := range test {
+		t.Run(tt.name, func(t *testing.T) {
+			um, err := user.BuildPeerMessage(tt.msg)
+			assert.Nil(t, err, "message could not be built")
+
+			_, err = um.MarshalJSON()
+			assert.Nil(t, err, "could not marshal user message to JSON")
+
+			ok, err := s.Verify(pairSender.PublicKey(), um.Message(), um.Signature())
+			assert.Nil(t, err, "verification must be possible")
+			assert.Equal(t, ok, tt.verifyResult, "verification must be true")
+		})
+	}
 
 }
