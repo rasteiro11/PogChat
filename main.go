@@ -66,6 +66,7 @@ func main() {
 
 	//fmt.Println("FINAL RESPONSE: ", string(decryptedMsg))
 
+	go server.StartClient()
 	server.StartServer()
 }
 

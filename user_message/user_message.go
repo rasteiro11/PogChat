@@ -63,6 +63,15 @@ func (m *user_message) GetSignature(fromPrivateKey []byte, encryptedMsg []byte) 
 	return m.Sig, nil
 }
 
+func ParseFromJSON(um string) (UserMessage, error) {
+	m := &user_message{}
+	err := json.Unmarshal([]byte(um), m)
+	if err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func WithSigner(signer cryptography.Signer) UserMessageOptions {
 	return func(u *user_message) {
 		u.signer = signer
