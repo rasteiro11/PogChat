@@ -1,6 +1,7 @@
 package main
 
 import (
+	"pogchat/client"
 	"pogchat/server"
 )
 
@@ -66,7 +67,7 @@ func main() {
 
 	//fmt.Println("FINAL RESPONSE: ", string(decryptedMsg))
 
-	go server.StartClient()
+	go client.StartClient()
 	server.StartServer()
 }
 
