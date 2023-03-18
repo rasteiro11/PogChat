@@ -1,14 +1,11 @@
 package client
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"net"
-	chatmessage "pogchat/chat_message"
-	"pogchat/key"
+	"pogchat/cryptography"
 	"pogchat/user_message"
-	"time"
 )
 
 type client struct {
@@ -16,17 +13,6 @@ type client struct {
 	publicKey []byte
 	socket    net.Conn
 	data      chan []byte
-}
-
-type Client interface {
-	LoggedIn() bool
-	PublicKey() []byte
-	SetLoggedIn(loggedIn bool)
-	SetPublicKey(publicKey []byte)
-	Close() error
-	Read(buf []byte) (int, error)
-	Write(buf []byte) (int, error)
-	WriteToChan() chan []byte
 }
 
 var _ Client = (*client)(nil)
@@ -40,13 +26,55 @@ func (c *client) Receive() {
 			break
 		}
 		if length > 0 {
-			//fmt.Println("RECEIVED: " + string(message))
+			fmt.Println("RECEIVED: " + string(message))
+		}
+	}
+}
+
+func trimByteSeq(seq []byte, delim byte) []byte {
+	finalSeq := make([]byte, 0)
+
+	for _, b := range seq {
+		if b == delim {
+			break
+		}
+		finalSeq = append(finalSeq, b)
+	}
+
+	return finalSeq
+}
+
+func (c *client) ReceiveAndDecrupt(private []byte) {
+	cryptor := cryptography.NewCryptor()
+	for {
+		message := make([]byte, 4096)
+		length, err := c.socket.Read(message)
+		if err != nil {
+			c.socket.Close()
+			break
+		}
+		if length > 0 {
+			fmt.Println("RECEIVED: " + string(message))
+
+			processedMsg := trimByteSeq(message, '\x00')
+			um, err := user_message.ParseFromJSON(string(processedMsg))
+			if err != nil {
+				log.Printf("[client.ReceiveAndDecrupt] ParseFromJSON() returned error: %+v\n", err)
+				continue
+			}
+
+			dec, err := cryptor.Decrypt(private, um.Message())
+			if err != nil {
+				log.Printf("[client.ReceiveAndDecrupt] could not decode error: %+v\n", err)
+				return
+			}
+
+			fmt.Println("DECRYPTED: ", string(dec))
 		}
 	}
 }
 
 func (c *client) Close() error {
-	close(c.data)
 	return c.socket.Close()
 }
 
@@ -78,8 +106,6 @@ func (c *client) SetPublicKey(publicKey []byte) {
 	c.publicKey = publicKey
 }
 
-type ClientOpts func(*client)
-
 func NewClient(opts ...ClientOpts) Client {
 	c := &client{
 		data: make(chan []byte),
@@ -95,74 +121,5 @@ func NewClient(opts ...ClientOpts) Client {
 func WithConnection(conn net.Conn) ClientOpts {
 	return func(c *client) {
 		c.socket = conn
-	}
-}
-
-func StartClient() {
-
-	time.Sleep(time.Second)
-	fmt.Println("[client.startClient] starting new client")
-	connection, error := net.Dial("tcp", "localhost:42069")
-	if error != nil {
-		fmt.Println(error)
-	}
-	client := &client{socket: connection}
-	pairSender, err := key.NewKeyPair(2048)
-	if err != nil {
-		log.Println("[server.StartClient] could not create key pair")
-		return
-	}
-
-	//pairReceiver, err := key.NewKeyPair(2048)
-	//if err != nil {
-	//	log.Println("[server.StartClient] could not create key pair")
-	//	return
-	//}
-
-	um := user_message.NewUserMessage(
-		user_message.WithFromPublicKey(pairSender.PublicKey()),
-		user_message.WithToPublicKey(pairSender.PublicKey()),
-	)
-
-	encryptedMsg, err := um.GetEncryptedMessage([]byte("GAMER"))
-	if err != nil {
-		log.Println("[server.StartClient] could encrypt msg")
-		return
-	}
-
-	_, err = um.GetSignature(pairSender.PrivateKey(), encryptedMsg)
-	if err != nil {
-		log.Println("[server.StartClient] could not sign message")
-		return
-	}
-
-	userMsg, err := um.MarshalJSON()
-	if err != nil {
-		log.Println("[server.StartClient] could not msrhal json")
-		return
-	}
-
-	go client.Receive()
-	msg, err := json.Marshal(&chatmessage.ChatMessage{
-		Type:    "LOGIN_MSG",
-		Payload: string(userMsg),
-	})
-	if err != nil {
-		log.Println("[server.StartClient] could not marshal json")
-		return
-	}
-	connection.Write(msg)
-	time.Sleep(time.Second * 5)
-	for {
-		msg, err := json.Marshal(&chatmessage.ChatMessage{
-			Type:    "PEER_MSG",
-			Payload: string(userMsg),
-		})
-		if err != nil {
-			log.Println("[server.StartClient] could not marshal json")
-			return
-		}
-		connection.Write(msg)
-		time.Sleep(time.Second * 5)
 	}
 }

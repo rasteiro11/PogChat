@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -14,17 +15,48 @@ import (
 	"pogchat/user_message"
 )
 
-type ConnManager struct {
+type connManager struct {
 	// TODO: WE NEED A BETTER WAY TO FIND CLIENTS MAYBE HASH PUBLIC KEY ?
 	logged     map[string]client.Client
-	logout     chan client.Client
 	clients    map[client.Client]bool
 	broadcast  chan *chatmessage.ChatMessage
 	register   chan client.Client
 	unregister chan client.Client
 }
 
-func (manager *ConnManager) Receive(client client.Client) {
+var ClientIsRegisteredError = errors.New("this client already exists")
+
+var _ ConnectionManager = (*connManager)(nil)
+
+func (man *connManager) Register(c client.Client) error {
+	_, ok := man.clients[c]
+	if ok {
+		log.Println("[server.Register] trying to register a client that already exists")
+		return ClientIsRegisteredError
+	}
+
+	man.clients[c] = true
+	log.Println("[server.Register] a connection has been made!")
+	return nil
+}
+
+func (man *connManager) Unregister(c client.Client) error {
+	pk := base64.RawStdEncoding.EncodeToString(c.PublicKey())
+	if c.LoggedIn() {
+		if _, ok := man.logged[pk]; ok {
+			delete(man.logged, pk)
+			log.Println("[server.Unregister] a logged connection has terminated!")
+		}
+	} else {
+		if _, ok := man.clients[c]; ok {
+			delete(man.clients, c)
+			log.Println("[server.Unregister] a connection has terminated!")
+		}
+	}
+	return nil
+}
+
+func (manager *connManager) Receive(client client.Client) {
 	for {
 		message := make([]byte, 4096)
 		length, err := client.Read(message)
@@ -44,17 +76,11 @@ func (manager *ConnManager) Receive(client client.Client) {
 			err := json.Unmarshal([]byte(processedMsg), chatMsg)
 			if err != nil {
 				log.Printf("[server.Receive] json.Unmarshal() returned error: %+v\n", err)
-				manager.unregister <- client
-				if err != nil {
-					log.Printf("[server.Receive] client.Close() returned error: %+v\n", err)
-					break
-				}
 				break
 			}
 
 			if client.LoggedIn() {
 				manager.broadcast <- chatMsg
-				client.WriteToChan() <- []byte("TALOGADOJABURRO")
 				continue
 			}
 
@@ -75,11 +101,12 @@ func (manager *ConnManager) Receive(client client.Client) {
 			client.SetLoggedIn(true)
 			client.SetPublicKey(um.FromPublicKey())
 			manager.logged[base64.RawStdEncoding.EncodeToString(pk)] = client
+			delete(manager.clients, client)
 		}
 	}
 }
 
-func (man *ConnManager) Send(client client.Client) {
+func (man *connManager) Send(client client.Client) {
 	defer client.Close()
 	for {
 		select {
@@ -87,11 +114,6 @@ func (man *ConnManager) Send(client client.Client) {
 			if !ok {
 				return
 			}
-			log.Println("-----------------------------------------------------------------------------------------------")
-			log.Println("[server.Send] sending message to client")
-			log.Println("-----------------------------------------------------------------------------------------------")
-			log.Println(string(message) + "\n")
-			log.Println("-----------------------------------------------------------------------------------------------")
 			_, err := client.Write(message)
 			if err != nil {
 				log.Println("[server.Send] could not write to peer")
@@ -114,35 +136,23 @@ func trimByteSeq(seq []byte, delim byte) []byte {
 	return finalSeq
 }
 
-type ChatMsgType int
-
-const (
-	LOGIN_MSG ChatMsgType = iota
-	PEER_MSG
-)
-
 var signer cryptography.Signer = cryptography.NewSigner(
 	cryptography.WithSignerHasher(crypto.SHA256),
 	cryptography.WithSignerRandomizer(rand.Reader),
 )
 
-func (man *ConnManager) Start() {
+func (man *connManager) Start() {
 	for {
 		select {
 		case connection := <-man.register:
-			man.clients[connection] = true
-			log.Println("[server.Start] a connection has been made!")
-		case connection := <-man.unregister:
-			pk := base64.RawStdEncoding.EncodeToString(connection.PublicKey())
-			if connection.LoggedIn() {
-				//close(connection.data)
-				delete(man.logged, pk)
-				log.Printf("[server.Start] client with public key %s\n", pk)
+			err := man.Register(connection)
+			if err != nil {
+				log.Printf("[server.Start] man.Register() returned error: %+v\n", err)
 			}
-			if _, ok := man.clients[connection]; ok {
-				//close(connection.data)
-				delete(man.clients, connection)
-				log.Println("[server.Start] a connection has terminated!")
+		case connection := <-man.unregister:
+			err := man.Unregister(connection)
+			if err != nil {
+				log.Printf("[server.Start] man.Register() returned error: %+v\n", err)
 			}
 		case chatMsg := <-man.broadcast:
 			um, err := user_message.ParseFromJSON(chatMsg.Payload)
@@ -168,28 +178,71 @@ func (man *ConnManager) Start() {
 	}
 }
 
-func StartServer() {
+type server struct {
+	connManager ConnectionManager
+	listener    net.Listener
+	network     string
+	address     string
+}
+
+func (s *server) Start() {
 	log.Println("[server.NewServer] starting server")
-	listener, err := net.Listen("tcp", ":42069")
+	listener, err := net.Listen(s.network, s.address)
 	if err != nil {
 		fmt.Printf("[server.NewServer] net.Listen() returned error: %+v\n", err)
+		return
 	}
-	manager := ConnManager{
-		clients:    make(map[client.Client]bool),
-		logged:     make(map[string]client.Client),
-		broadcast:  make(chan *chatmessage.ChatMessage),
-		register:   make(chan client.Client),
-		unregister: make(chan client.Client),
-	}
-	go manager.Start()
 	for {
 		connection, err := listener.Accept()
 		if err != nil {
 			log.Printf("[server.NewServer] listener.Accept() returned error: %+v\n", err)
 		}
 		client := client.NewClient(client.WithConnection(connection))
-		manager.register <- client
-		go manager.Receive(client)
-		go manager.Send(client)
+		s.connManager.Register(client)
+		go s.connManager.Receive(client)
+		go s.connManager.Send(client)
 	}
+}
+
+func WithAddress(addr string) ServerOpts {
+	return func(s *server) {
+		s.address = addr
+	}
+}
+
+func WithNetwork(network string) ServerOpts {
+	return func(s *server) {
+		s.network = network
+	}
+}
+
+func WithConnectionManager(manager ConnectionManager) ServerOpts {
+	return func(s *server) {
+		s.connManager = manager
+	}
+}
+
+func NewServer(opts ...ServerOpts) Server {
+	s := &server{
+		address: ":42069",
+		network: "tcp",
+	}
+
+	for _, opt := range opts {
+		opt(s)
+	}
+
+	if s.connManager == nil {
+		s.connManager = &connManager{
+			clients:    make(map[client.Client]bool),
+			logged:     make(map[string]client.Client),
+			broadcast:  make(chan *chatmessage.ChatMessage),
+			register:   make(chan client.Client),
+			unregister: make(chan client.Client),
+		}
+	}
+
+	go s.connManager.Start()
+
+	return s
 }

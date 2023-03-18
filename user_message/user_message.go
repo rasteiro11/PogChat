@@ -38,27 +38,23 @@ func (m *user_message) Message() []byte {
 }
 
 func (m *user_message) GetEncryptedMessage(msg []byte) ([]byte, error) {
-	if m.Msg == nil {
-		encryptedMsg, err := m.cryptor.Encrypt(m.ToPK, msg)
-		if err != nil {
-			return nil, err
-		}
-
-		m.Msg = encryptedMsg
+	encryptedMsg, err := m.cryptor.Encrypt(m.ToPK, msg)
+	if err != nil {
+		return nil, err
 	}
+
+	m.Msg = encryptedMsg
 
 	return m.Msg, nil
 }
 
 func (m *user_message) GetSignature(fromPrivateKey []byte, encryptedMsg []byte) ([]byte, error) {
-	if m.Sig == nil {
-		sig, err := m.signer.Sign(fromPrivateKey, encryptedMsg)
-		if err != nil {
-			return nil, err
-		}
-
-		m.Sig = sig
+	sig, err := m.signer.Sign(fromPrivateKey, encryptedMsg)
+	if err != nil {
+		return nil, err
 	}
+
+	m.Sig = sig
 
 	return m.Sig, nil
 }

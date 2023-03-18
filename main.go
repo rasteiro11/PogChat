@@ -1,94 +1,197 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net"
+	"os"
+	chatmessage "pogchat/chat_message"
 	"pogchat/client"
+	"pogchat/key"
 	"pogchat/server"
+	"pogchat/user_message"
 )
 
-//func runServer() {
-//	l, err := net.Listen("tcp4", ":42069")
-//	defer l.Close()
-//	if err != nil {
-//		fmt.Println(err)
-//		return
-//	}
-//
-//	c, err := l.Accept()
-//	if err != nil {
-//		fmt.Errorf("Accept failed: %+v\n", err)
-//		return
-//	}
-//
-//	go handlePeer(c)
-//}
-
-func main() {
-	//pair, _ := key.NewKeyPair(2048)
-	//cryptor := cryptography.NewCryptor(cryptography.WithHasher(sha1.New()), cryptography.WithRandomizer(rand.Reader))
-	//go runServer()
-	//time.Sleep(time.Second * 5)
-	//scannerStdin := bufio.NewScanner(os.Stdin)
-	//fmt.Print("Server message: ")
-	//c, err := net.Dial("tcp", "127.0.0.1:42069")
-	//if err != nil {
-	//	fmt.Printf("ERROR: %+v\n", err)
-	//	return
-	//}
-	//for scannerStdin.Scan() {
-	//	text := scannerStdin.Text()
-
-	//	encryptedMsg, err := cryptor.Encrypt(pair.PublicKey(), []byte(text))
-	//	if err != nil {
-	//		fmt.Printf("ERROR: %+v\n", err)
-	//	}
-
-	//	// send to server
-	//	fmt.Println("SENT THIS TO SERVER: ", base64.RawURLEncoding.EncodeToString(encryptedMsg))
-	//	_, err = fmt.Fprintf(c, base64.RawURLEncoding.EncodeToString(encryptedMsg)+"\n")
-	//	if err != nil {
-	//		fmt.Printf("ERROR SEND TO SERVER: %+v\n", err)
-	//	}
-
-	//	break
-	//}
-
-	//// listen for reply
-	//serverResponse, _ := bufio.NewReader(c).ReadString('\n')
-
-	//dec, err := base64.RawURLEncoding.DecodeString(string(serverResponse[:len(serverResponse)-1]))
-	//if err != nil {
-	//	fmt.Printf("ERROR DECODING BASE64: %+v\n", err)
-	//}
-
-	//decryptedMsg, err := cryptor.Decrypt(pair.PrivateKey(), dec)
-	//if err != nil {
-	//	fmt.Printf("ERROR: %+v\n", err)
-	//}
-
-	//fmt.Println("FINAL RESPONSE: ", string(decryptedMsg))
-
-	go client.StartClient()
-	server.StartServer()
+type UserClient struct {
+	pair           key.KeyPair
+	receiver       key.KeyPair
+	publicKeyFile  string
+	privateKeyFile string
+	client         client.Client
 }
 
-//func handlePeer(c net.Conn) {
-//	for {
-//		data, err := bufio.NewReader(c).ReadSlice('\n')
-//		if err != nil {
-//			fmt.Printf("ERROR: %+v\n", err)
-//			break
-//		}
-//
-//		nBytes, err := c.Write([]byte(data))
-//		if err != nil {
-//			fmt.Printf("ERROR: %+v\n", err)
-//			break
-//		}
-//
-//		if nBytes == 0 {
-//			fmt.Printf("Closing connection with: %s\n", c.RemoteAddr().String())
-//			return
-//		}
-//	}
-//	c.Close()
-//}
+type UserClientOpts func(*UserClient)
+
+func WithPublicKeyFile(file string) UserClientOpts {
+	return func(uc *UserClient) {
+		uc.publicKeyFile = file
+	}
+}
+
+func WithPrivateKeyFile(file string) UserClientOpts {
+	return func(uc *UserClient) {
+		uc.privateKeyFile = file
+	}
+}
+
+func WithClient(c client.Client) UserClientOpts {
+	return func(uc *UserClient) {
+		uc.client = c
+	}
+}
+
+func (c *UserClient) SetReceiver(receiver key.KeyPair) {
+	c.receiver = receiver
+}
+
+func (c *UserClient) HandleUserInput() {
+	userInputMsg := user_message.NewUserMessage(
+		user_message.WithFromPublicKey(c.pair.PublicKey()),
+		user_message.WithToPublicKey(c.receiver.PublicKey()),
+	)
+
+	reader := bufio.NewReader(os.Stdin)
+
+	//cryptor := cryptography.NewCryptor()
+	for {
+		fmt.Print("Enter text: ")
+		text, _ := reader.ReadString('\n')
+
+		encryptedMsg, err := userInputMsg.GetEncryptedMessage([]byte(text))
+		if err != nil {
+			log.Printf("[server.StartClient] userInputMsg.GetEncryptedMessage() returned error: %+v\n", err)
+			return
+		}
+
+		_, err = userInputMsg.GetSignature(c.pair.PrivateKey(), encryptedMsg)
+		if err != nil {
+			log.Printf("[server.StartClient] userInputMsg.GetSignature() returned error: %+v\n", err)
+			return
+		}
+
+		Msg, err := userInputMsg.MarshalJSON()
+		if err != nil {
+			log.Println("[server.StartClient] could not msrhal json")
+			return
+		}
+
+		msg, err := json.Marshal(&chatmessage.ChatMessage{
+			Type:    "PEER_MSG",
+			Payload: string(Msg),
+		})
+		if err != nil {
+			log.Println("[server.StartClient] could not marshal json")
+			return
+		}
+
+		c.client.Write(msg)
+	}
+
+}
+
+func (c *UserClient) Login() error {
+	um := user_message.NewUserMessage(
+		user_message.WithFromPublicKey(c.pair.PublicKey()),
+		user_message.WithToPublicKey(c.pair.PublicKey()),
+	)
+
+	encryptedMsg, err := um.GetEncryptedMessage([]byte("GAMER"))
+	if err != nil {
+		log.Println("[Login] could not encrypt msg")
+		return err
+	}
+
+	_, err = um.GetSignature(c.pair.PrivateKey(), encryptedMsg)
+	if err != nil {
+		log.Println("[Login] could not sign message")
+		return err
+	}
+
+	userMsg, err := um.MarshalJSON()
+	if err != nil {
+		log.Println("[server.StartClient] could not msrhal json")
+		return err
+	}
+
+	msg, err := json.Marshal(&chatmessage.ChatMessage{
+		Type:    "LOGIN_MSG",
+		Payload: string(userMsg),
+	})
+	if err != nil {
+		log.Println("[Login] could not marshal json")
+		return err
+	}
+
+	_, err = c.client.Write(msg)
+	if err != nil {
+		log.Printf("[Login] c.client.Write() returned error: %+v\n", err)
+		return err
+
+	}
+
+	log.Println("[Login] user is now logged in")
+	return nil
+}
+
+func NewUserClient(opts ...UserClientOpts) (*UserClient, error) {
+	c := &UserClient{
+		publicKeyFile:  os.Getenv("SENDER_PUBLIC"),
+		privateKeyFile: os.Getenv("SENDER_PRIVATE"),
+	}
+
+	pair, err := key.LoadKeyPair(key.WithPublicKey(c.publicKeyFile), key.WithPrivateKey(c.privateKeyFile))
+	if err != nil {
+		log.Println("[NewUserClient] could not load key pair")
+		return nil, err
+	}
+
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	c.pair = pair
+
+	go c.client.ReceiveAndDecrupt(c.pair.PrivateKey())
+
+	return c, nil
+}
+
+func main() {
+	v := os.Getenv("SERVER")
+
+	if v == "server" {
+		fmt.Println("THIS IS ENV VAR: ", v)
+		server.NewServer().Start()
+	}
+
+	connection, error := net.Dial("tcp", "localhost:42069")
+	if error != nil {
+		fmt.Println(error)
+	}
+
+	client := client.NewClient(client.WithConnection(connection))
+	userClient, err := NewUserClient(WithClient(client))
+	if err != nil {
+		log.Printf("[main.NewUserClient] NewUserMessage() returned error %+v\n", err)
+		return
+	}
+
+	err = userClient.Login()
+	if err != nil {
+		log.Printf("[main.Login] userClient.Login() returned error: %+v\n", err)
+		return
+	}
+
+	receiver, err := key.LoadKeyPair(key.WithPublicKey(os.Getenv("RECEIVER_PUBLIC")))
+	if err != nil {
+		log.Println("[main] could not load key pair")
+		return
+	}
+
+	userClient.SetReceiver(receiver)
+
+	userClient.HandleUserInput()
+
+}
