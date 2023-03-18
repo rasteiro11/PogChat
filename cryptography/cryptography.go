@@ -2,6 +2,7 @@ package cryptography
 
 import (
 	"crypto"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
@@ -54,7 +55,10 @@ func WithRandomizer(r io.Reader) CryptorOpts {
 }
 
 func NewCryptor(opts ...CryptorOpts) Cryptor {
-	c := &cryptor{}
+	c := &cryptor{
+		r:      rand.Reader,
+		hasher: sha256.New(),
+	}
 
 	for _, opt := range opts {
 		opt(c)
@@ -83,7 +87,10 @@ func WithSignerRandomizer(r io.Reader) SignerOpts {
 }
 
 func NewSigner(opts ...SignerOpts) Signer {
-	c := &signer{}
+	c := &signer{
+		r:      rand.Reader,
+		hasher: crypto.SHA256,
+	}
 
 	for _, opt := range opts {
 		opt(c)
