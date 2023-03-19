@@ -10,7 +10,7 @@ type Client interface {
 	Write(buf []byte) (int, error)
 	WriteToChan() chan []byte
 	Receive()
-	ReceiveAndDecrupt(private []byte)
+	ReceiveAndDecrypt(private []byte, rec chan []byte)
 }
 
 type ClientOpts func(*client)

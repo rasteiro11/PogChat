@@ -271,7 +271,7 @@ func main() {
 					tui.NewLabel(string(message)),
 					tui.NewSpacer(),
 				))
-				ui.Repaint()
+				// ui.Repaint()
 			}
 		}
 	}()
