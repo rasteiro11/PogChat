@@ -44,7 +44,7 @@ func trimByteSeq(seq []byte, delim byte) []byte {
 	return finalSeq
 }
 
-func (c *client) ReceiveAndDecrupt(private []byte) {
+func (c *client) ReceiveAndDecrypt(private []byte, rec chan []byte) {
 	cryptor := cryptography.NewCryptor()
 	for {
 		message := make([]byte, 4096)
@@ -54,8 +54,6 @@ func (c *client) ReceiveAndDecrupt(private []byte) {
 			break
 		}
 		if length > 0 {
-			fmt.Println("RECEIVED: " + string(message))
-
 			processedMsg := trimByteSeq(message, '\x00')
 			um, err := user_message.ParseFromJSON(string(processedMsg))
 			if err != nil {
@@ -69,7 +67,7 @@ func (c *client) ReceiveAndDecrupt(private []byte) {
 				return
 			}
 
-			fmt.Println("DECRYPTED: ", string(dec))
+			rec <- dec
 		}
 	}
 }
