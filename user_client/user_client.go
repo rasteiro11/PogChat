@@ -1,61 +1,65 @@
-package main
+package userclient
 
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
-	"net"
 	"os"
 	chatmessage "pogchat/chat_message"
 	"pogchat/client"
 	"pogchat/key"
-	"pogchat/server"
 	"pogchat/user_message"
 	"time"
 
 	"github.com/marcusolsson/tui-go"
 )
 
-type UserClient struct {
+type userClient struct {
 	pair           key.KeyPair
 	receiver       key.KeyPair
 	publicKeyFile  string
 	privateKeyFile string
 	client         client.Client
 	recChan        chan []byte
+	ui             tui.UI
+	history        *tui.Box
 }
 
-type UserClientOpts func(*UserClient)
-
 func WithPublicKeyFile(file string) UserClientOpts {
-	return func(uc *UserClient) {
+	return func(uc *userClient) {
 		uc.publicKeyFile = file
 	}
 }
 
 func WithPrivateKeyFile(file string) UserClientOpts {
-	return func(uc *UserClient) {
+	return func(uc *userClient) {
 		uc.privateKeyFile = file
 	}
 }
 
 func WithClient(c client.Client) UserClientOpts {
-	return func(uc *UserClient) {
+	return func(uc *userClient) {
 		uc.client = c
 	}
 }
 
-func (c *UserClient) GetUserName() string {
+func (c *userClient) GetUsername() string {
 	pk := c.pair.PublicKey()
-	return string(base64.RawStdEncoding.EncodeToString(c.pair.PublicKey()[len(pk)-10:]))
+	return string(base64.RawStdEncoding.EncodeToString(pk[len(pk)-10:]))
 }
 
-func (c *UserClient) SetReceiver(receiver key.KeyPair) {
+func (c *userClient) GetPeername() string {
+	pk := c.receiver.PublicKey()
+	return string(base64.RawStdEncoding.EncodeToString(pk[len(pk)-10:]))
+}
+
+func (c *userClient) SetReceiver(receiver key.KeyPair) {
 	c.receiver = receiver
 }
 
-func (c *UserClient) SendMessage(text string) error {
+func (c *userClient) SendMessage(text string) error {
 	userInputMsg := user_message.NewUserMessage(
 		user_message.WithFromPublicKey(c.pair.PublicKey()),
 		user_message.WithToPublicKey(c.receiver.PublicKey()),
@@ -97,7 +101,7 @@ func (c *UserClient) SendMessage(text string) error {
 	return nil
 }
 
-func (c *UserClient) Login() error {
+func (c *userClient) Login() error {
 	um := user_message.NewUserMessage(
 		user_message.WithFromPublicKey(c.pair.PublicKey()),
 		user_message.WithToPublicKey(c.pair.PublicKey()),
@@ -141,70 +145,7 @@ func (c *UserClient) Login() error {
 	return nil
 }
 
-func NewUserClient(opts ...UserClientOpts) (*UserClient, error) {
-	c := &UserClient{
-		publicKeyFile:  os.Getenv("SENDER_PUBLIC"),
-		privateKeyFile: os.Getenv("SENDER_PRIVATE"),
-		recChan:        make(chan []byte),
-	}
-
-	pair, err := key.LoadKeyPair(key.WithPublicKey(c.publicKeyFile), key.WithPrivateKey(c.privateKeyFile))
-	if err != nil {
-		log.Println("[NewUserClient] could not load key pair")
-		return nil, err
-	}
-
-	for _, opt := range opts {
-		opt(c)
-	}
-
-	c.pair = pair
-
-	go c.client.ReceiveAndDecrypt(c.pair.PrivateKey(), c.recChan)
-
-	return c, nil
-}
-
-type message struct {
-	username string
-	message  string
-	time     string
-}
-
-var messages = []message{}
-
-func main() {
-	v := os.Getenv("SERVER")
-
-	if v == "server" {
-		server.NewServer().Start()
-	}
-
-	connection, error := net.Dial("tcp", "localhost:42069")
-	if error != nil {
-		fmt.Println(error)
-	}
-
-	client := client.NewClient(client.WithConnection(connection))
-	userClient, err := NewUserClient(WithClient(client))
-	if err != nil {
-		log.Printf("[main.NewUserClient] NewUserMessage() returned error %+v\n", err)
-		return
-	}
-
-	err = userClient.Login()
-	if err != nil {
-		log.Printf("[main.Login] userClient.Login() returned error: %+v\n", err)
-		return
-	}
-
-	receiver, err := key.LoadKeyPair(key.WithPublicKey(os.Getenv("RECEIVER_PUBLIC")))
-	if err != nil {
-		log.Println("[main] could not load key pair")
-		return
-	}
-
-	userClient.SetReceiver(receiver)
+func (c *userClient) BuildUI() error {
 	history := tui.NewVBox()
 
 	historyScroll := tui.NewScrollArea(history)
@@ -225,18 +166,18 @@ func main() {
 	chat.SetSizePolicy(tui.Expanding, tui.Expanding)
 
 	input.OnSubmit(func(e *tui.Entry) {
-		err := userClient.SendMessage(e.Text())
+		err := c.SendMessage(e.Text())
 		if err != nil {
 			history.Append(tui.NewHBox(
 				tui.NewLabel(time.Now().String()),
-				tui.NewPadder(1, 0, tui.NewLabel(fmt.Sprintf("<%s>", userClient.GetUserName()))),
+				tui.NewPadder(1, 0, tui.NewLabel(fmt.Sprintf("<%s>", c.GetUsername()))),
 				tui.NewLabel(fmt.Sprintf("[ERROR] could not send message: %+v", err)),
 				tui.NewSpacer(),
 			))
 		} else {
 			history.Append(tui.NewHBox(
 				tui.NewLabel(time.Now().String()),
-				tui.NewPadder(1, 0, tui.NewLabel(fmt.Sprintf("<%s>", userClient.GetUserName()))),
+				tui.NewPadder(1, 0, tui.NewLabel(fmt.Sprintf("<%s>", c.GetUsername()))),
 				tui.NewLabel(e.Text()),
 				tui.NewSpacer(),
 			))
@@ -251,33 +192,63 @@ func main() {
 		log.Fatal(err)
 	}
 
+	c.ui = ui
+	c.history = history
+
 	ui.SetKeybinding("Esc", func() { ui.Quit() })
 
+	return nil
+}
+
+func (u *userClient) Run() error {
 	go func() {
 		for {
 			select {
-			case message, ok := <-userClient.recChan:
+			case message, ok := <-u.recChan:
 				if !ok {
-					history.Append(tui.NewHBox(
+					u.history.Append(tui.NewHBox(
 						tui.NewLabel(time.Now().String()),
-						tui.NewPadder(1, 0, tui.NewLabel(fmt.Sprintf("<%s>", userClient.GetUserName()))),
-						tui.NewLabel(fmt.Sprintf("[ERROR] could not receive message: %+v", err)),
+						tui.NewPadder(1, 0, tui.NewLabel(fmt.Sprintf("<%s>", u.GetUsername()))),
+						tui.NewLabel(fmt.Sprintf("[ERROR] could not receive message: %+v", errors.New("something went wrong decrypting message"))),
 						tui.NewSpacer(),
 					))
 				}
-				history.Append(tui.NewHBox(
+				u.history.Append(tui.NewHBox(
 					tui.NewLabel(time.Now().String()),
-					tui.NewPadder(1, 0, tui.NewLabel(fmt.Sprintf("<%s>", userClient.GetUserName()))),
+					tui.NewPadder(1, 0, tui.NewLabel(fmt.Sprintf("<%s>", u.GetUsername()))),
 					tui.NewLabel(string(message)),
 					tui.NewSpacer(),
 				))
-				// ui.Repaint()
+				u.ui.Repaint()
 			}
 		}
 	}()
+	if err := u.ui.Run(); err != nil {
+		return err
+	}
+	return nil
+}
 
-	if err := ui.Run(); err != nil {
-		log.Fatal(err)
+func NewUserClient(opts ...UserClientOpts) (*userClient, error) {
+	c := &userClient{
+		publicKeyFile:  os.Getenv("SENDER_PUBLIC"),
+		privateKeyFile: os.Getenv("SENDER_PRIVATE"),
+		recChan:        make(chan []byte),
 	}
 
+	pair, err := key.LoadKeyPair(key.WithPublicKey(c.publicKeyFile), key.WithPrivateKey(c.privateKeyFile))
+	if err != nil {
+		log.Println("[NewUserClient] could not load key pair")
+		return nil, err
+	}
+
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	c.pair = pair
+
+	go c.client.ReceiveAndDecrypt(c.pair.PrivateKey(), c.recChan)
+
+	return c, nil
 }
