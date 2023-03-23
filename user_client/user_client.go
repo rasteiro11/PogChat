@@ -208,14 +208,14 @@ func (u *userClient) Run() error {
 				if !ok {
 					u.history.Append(tui.NewHBox(
 						tui.NewLabel(time.Now().String()),
-						tui.NewPadder(1, 0, tui.NewLabel(fmt.Sprintf("<%s>", u.GetUsername()))),
+						tui.NewPadder(1, 0, tui.NewLabel(fmt.Sprintf("<%s>", u.GetPeername()))),
 						tui.NewLabel(fmt.Sprintf("[ERROR] could not receive message: %+v", errors.New("something went wrong decrypting message"))),
 						tui.NewSpacer(),
 					))
 				}
 				u.history.Append(tui.NewHBox(
 					tui.NewLabel(time.Now().String()),
-					tui.NewPadder(1, 0, tui.NewLabel(fmt.Sprintf("<%s>", u.GetUsername()))),
+					tui.NewPadder(1, 0, tui.NewLabel(fmt.Sprintf("<%s>", u.GetPeername()))),
 					tui.NewLabel(string(message)),
 					tui.NewSpacer(),
 				))
