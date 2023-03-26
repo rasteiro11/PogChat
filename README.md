@@ -10,5 +10,13 @@ A peer to peer encrypted chatting system using rsa algorithm for encryption and 
   6. Easy to run client
   7. Many client comunication protocol optons (TCP and WebSocket)
 
+- How to run **server**<br>
+  ``make``
+- How to run **test client**<br>
+  ``make me``<br>
+  ``make peer``
+- How to run **client**<br>
+  ``RECEIVER_PUBLIC=<receiverPublicFilePath.key> SENDER_PUBLIC=<senderPublicFilePath.key> SENDER_PRIVATE=<senderPrivateFilePath.key> go run main.go``
+
 Chat to anyone anywhere with privacy and anonymity
   
