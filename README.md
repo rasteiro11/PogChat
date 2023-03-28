@@ -1,6 +1,6 @@
 # PogChat
 
-A peer to peer encrypted chatting system using rsa algorithm for encryption and TCP protocol for comunication between machines 
+A peer to peer encrypted chatting system using rsa algorithm for encryption and TCP protocol for comunication
 - Features
   1. Peer comunication using other user public key
   2. Privacy due to message encryption using [RSA](https://www.rfc-editor.org/rfc/rfc8017)
